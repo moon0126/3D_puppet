@@ -6,13 +6,14 @@
   <meta name="apple-mobile-web-app-title" content="3D木偶" />
   <link rel="manifest" href="./manifest.json" />
 
-  <title>3D 人偶觸控調整</title>
+  <title>3D 人偶姿勢控制器</title>
   <style>
     * {
       touch-action: none;
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
+      box-sizing: border-box;
     }
     body {
       margin: 0;
@@ -22,57 +23,77 @@
     }
     #hud {
       position: absolute;
-      top: env(safe-area-inset-top, 16px);
-      left: 16px;
-      background: rgba(25, 25, 25, 0.92);
+      top: env(safe-area-inset-top, 20px);
+      left: 20px;
+      background: rgba(30, 30, 30, 0.92);
       color: #fff;
-      padding: 14px;
+      padding: 16px 20px;
       border-radius: 12px;
-      font-size: 13px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-      border: 1px solid #3a3a3a;
+      font-size: 14px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      border: 1px solid #383838;
       z-index: 10;
-      line-height: 1.5;
-      max-width: 290px;
+      line-height: 1.6;
+      width: 290px;
+    }
+    .title {
+      font-size: 15px;
+      font-weight: bold;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .mode-status {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #e0e0e0;
     }
     .badge {
       color: #00ffcc;
       font-weight: bold;
     }
-    .mode-group {
-      display: flex;
-      gap: 6px;
+    .instructions {
+      color: #aaa;
+      font-size: 12px;
       margin-top: 10px;
+      line-height: 1.6;
+      border-top: 1px solid #3a3a3a;
+      padding-top: 10px;
     }
-    .mode-btn {
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .btn {
       flex: 1;
-      padding: 8px 4px;
-      background: #333;
-      color: #bbb;
+      padding: 8px 10px;
+      background: #3a3a3a;
+      color: #fff;
       border: 1px solid #555;
       border-radius: 6px;
       cursor: pointer;
-      font-size: 12px;
-      font-weight: bold;
+      font-size: 13px;
+      font-weight: 500;
+      text-align: center;
     }
-    .mode-btn.active {
+    .btn-primary {
+      background: #383838;
+      border-color: #666;
+    }
+    .btn-primary.active {
       background: #00d4aa;
       color: #181818;
       border-color: #00d4aa;
+      font-weight: bold;
     }
-    .action-btn {
-      margin-top: 8px;
-      width: 100%;
-      padding: 7px;
-      background: #444;
-      color: #fff;
-      border: 1px solid #666;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .action-btn:active {
-      background: #666;
+    .btn:active {
+      background: #555;
     }
   </style>
   <script type="importmap">
@@ -84,22 +105,21 @@
     }
   </script></head><body>
   <div id="hud">
-    <div><strong>📱 iPad 觸控木偶人</strong></div>
-    <div style="margin-top: 4px;">目前選中：<span id="currentPart" class="badge">無</span></div>
+    <div class="title">🎯 3D 人偶姿勢控制器</div>
+    <div id="currentModeText" class="mode-status">當前模式：視角旋轉模式</div>
+    <div>當前選中：<span id="currentPart" class="badge">無</span></div>
     
-    <!-- 模式切換按鈕區 -->
-    <div class="mode-group">
-      <button id="modeBone" class="mode-btn active">🦴 調整關節</button>
-      <button id="modeRotateView" class="mode-btn">🔄 旋轉視角</button>
-      <button id="modePanView" class="mode-btn">✋ 平移視角</button>
+    <div class="instructions">
+      🎮 操作方式：<br>
+      • <span id="primaryGestureText">一般滑動：旋轉相機看角度</span><br>
+      • 雙指捏合：縮放視角<br>
+      • 三指滑動：平移視角 (移動畫面)
     </div>
 
-    <div id="gestureHint" style="color: #aaa; font-size: 11px; margin-top: 8px;">
-      👉 <strong>單指</strong>：拖動關節<br>
-      ✌️ <strong>雙指</strong>：旋轉/縮放 | 🖐️ <strong>三指</strong>：平移視角
+    <div class="btn-group">
+      <button id="toggleModeBtn" class="btn btn-primary">切換為關節模式</button>
+      <button id="resetPoseBtn" class="btn">重置站姿</button>
     </div>
-
-    <button id="resetPoseBtn" class="action-btn">重置站姿</button>
   </div>
 
   <script type="module">
@@ -108,7 +128,7 @@
     import { TransformControls } from 'three/addons/controls/TransformControls.js';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-    // 1. 初始化場景
+    // 1. 初始化 3D 環境
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x181818);
 
@@ -127,34 +147,33 @@
     dirLight.position.set(3, 8, 4);
     scene.add(dirLight);
 
-    // 2. 控制器配置
+    // 2. 視角控制器（配置單指、雙指、三指）
     const orbit = new OrbitControls(camera, renderer.domElement);
     orbit.target.set(0, 1.0, 0);
     orbit.enableDamping = true;
     orbit.dampingFactor = 0.05;
-    orbit.enablePan = true; // 開啟平移功能
+    orbit.enablePan = true;
 
-    // 預設手勢配置（保留三指平移支援）
-    function applyOrbitMode(mode) {
-      if (mode === 'bone') {
+    // 手勢對照設定
+    function setupOrbitControls(isJointMode) {
+      if (isJointMode) {
+        // 關節模式：單指留給肢體，相機只由雙指旋轉縮放、三指平移
         orbit.touches = {
-          ONE: null, // 單指留給關節拖動
-          TWO: THREE.TOUCH.DOLLY_ROTATE, // 雙指旋轉/縮放
+          ONE: null,
+          TWO: THREE.TOUCH.DOLLY_ROTATE,
+          THREE: THREE.TOUCH.PAN
         };
-      } else if (mode === 'rotate') {
+      } else {
+        // 視角模式：單指直接旋轉相機，雙指縮放，三指平移
         orbit.touches = {
-          ONE: THREE.TOUCH.ROTATE, // 單指直接轉動視角
-          TWO: THREE.TOUCH.DOLLY_PAN
-        };
-      } else if (mode === 'pan') {
-        orbit.touches = {
-          ONE: THREE.TOUCH.PAN, // 單指直接平移視角
-          TWO: THREE.TOUCH.DOLLY_ROTATE
+          ONE: THREE.TOUCH.ROTATE,
+          TWO: THREE.TOUCH.DOLLY,
+          THREE: THREE.TOUCH.PAN
         };
       }
       orbit.update();
     }
-    applyOrbitMode('bone');
+    setupOrbitControls(false); // 預設為視角模式
 
     const transform = new TransformControls(camera, renderer.domElement);
     transform.setMode('rotate');
@@ -165,37 +184,35 @@
       orbit.enabled = !e.value;
     });
 
-    // 3. 模式狀態管理
-    let currentMode = 'bone'; // 'bone' | 'rotate' | 'pan'
-    const btnBone = document.getElementById('modeBone');
-    const btnRotate = document.getElementById('modeRotateView');
-    const btnPan = document.getElementById('modePanView');
-    const hintEl = document.getElementById('gestureHint');
+    // 3. 模式切換邏輯
+    let isJointMode = false;
+    const toggleBtn = document.getElementById('toggleModeBtn');
+    const currentModeText = document.getElementById('currentModeText');
+    const primaryGestureText = document.getElementById('primaryGestureText');
+    const currentPartEl = document.getElementById('currentPart');
 
-    function switchMode(newMode) {
-      currentMode = newMode;
-      btnBone.classList.toggle('active', newMode === 'bone');
-      btnRotate.classList.toggle('active', newMode === 'rotate');
-      btnPan.classList.toggle('active', newMode === 'pan');
-
-      applyOrbitMode(newMode);
-
-      if (newMode === 'bone') {
-        hintEl.innerHTML = '👉 <strong>單指</strong>：拖動關節<br>✌️ <strong>雙指</strong>：旋轉/縮放 | 🖐️ <strong>三指</strong>：平移視角';
-      } else if (newMode === 'rotate') {
-        hintEl.innerHTML = '👉 <strong>單指</strong>：旋轉視角<br>✌️ <strong>雙指</strong>：縮放視角';
-        selectBone(null); // 離開關節模式時取消選取
-      } else if (newMode === 'pan') {
-        hintEl.innerHTML = '👉 <strong>單指</strong>：平移視角 (移動畫面)<br>✌️ <strong>雙指</strong>：旋轉/縮放';
+    function updateModeUI() {
+      if (isJointMode) {
+        currentModeText.textContent = '當前模式：關節調整模式';
+        toggleBtn.textContent = '切換為視角模式';
+        toggleBtn.classList.add('active');
+        primaryGestureText.innerHTML = '<strong>單指拖曳：直接轉動人偶肢體</strong>';
+      } else {
+        currentModeText.textContent = '當前模式：視角旋轉模式';
+        toggleBtn.textContent = '切換為關節模式';
+        toggleBtn.classList.remove('active');
+        primaryGestureText.innerHTML = '一般滑動：旋轉相機看角度';
         selectBone(null);
       }
+      setupOrbitControls(isJointMode);
     }
 
-    btnBone.addEventListener('click', () => switchMode('bone'));
-    btnRotate.addEventListener('click', () => switchMode('rotate'));
-    btnPan.addEventListener('click', () => switchMode('pan'));
+    toggleBtn.addEventListener('click', () => {
+      isJointMode = !isJointMode;
+      updateModeUI();
+    });
 
-    // 4. 中文名稱對照表
+    // 4. 中文名稱映射
     function toChineseName(name) {
       const n = name.toLowerCase();
       if (n.includes('head')) return '頭部';
@@ -220,7 +237,7 @@
       return name;
     }
 
-    // 5. 模型載入與關節判定球
+    // 5. 模型載入與關節判定
     const loader = new GLTFLoader();
     const MODEL_URL = 'https://threejs.org/examples/models/gltf/Xbot.glb';
 
@@ -228,7 +245,6 @@
     const defaultRotations = new Map();
     let loadedModel = null;
     let selectedBone = null;
-    const currentPartEl = document.getElementById('currentPart');
 
     loader.load(MODEL_URL, (gltf) => {
       loadedModel = gltf.scene;
@@ -275,7 +291,7 @@
       }
     }
 
-    // 6. 觸控拖曳邏輯
+    // 6. 觸控交互邏輯
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
     let isDraggingBone = false;
@@ -286,8 +302,8 @@
       if (e.target.closest('#hud')) return;
       if (transform.dragging) return;
 
-      // 若非關節模式，直接交由 OrbitControls 處理視角
-      if (currentMode !== 'bone') return;
+      // 只有在「關節調整模式」下才偵測肢體點擊
+      if (!isJointMode) return;
 
       mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -329,7 +345,7 @@
     });
 
     window.addEventListener('pointermove', (e) => {
-      if (currentMode === 'bone' && isDraggingBone && selectedBone) {
+      if (isJointMode && isDraggingBone && selectedBone) {
         const deltaX = e.clientX - lastX;
         const deltaY = e.clientY - lastY;
 
