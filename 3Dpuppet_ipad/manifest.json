@@ -1,0 +1,15 @@
+{
+  "name": "3D關節木偶",
+  "short_name": "3D木偶",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#181818",
+  "theme_color": "#181818",
+  "icons": [
+    {
+      "src": "https://threejs.org/files/favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
+    }
+  ]
+}

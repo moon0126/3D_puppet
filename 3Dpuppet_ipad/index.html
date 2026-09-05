@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <!-- iOS 全螢幕 PWA 核心 Meta 標籤 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="3D木偶" />
+  <link rel="manifest" href="./manifest.json" />
+
+  <title>3D 人偶觸控調整</title>
+  <style>
+    * {
+      touch-action: none; /* 禁止 Safari 默認手勢，確保 3D 控制流暢 */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #181818;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #hud {
+      position: absolute;
+      top: env(safe-area-inset-top, 16px);
+      left: 16px;
+      background: rgba(25, 25, 25, 0.88);
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      border: 1px solid #3a3a3a;
+      z-index: 10;
+      line-height: 1.5;
+      max-width: 280px;
+    }
+    .badge {
+      color: #00ffcc;
+      font-weight: bold;
+    }
+    button {
+      margin-top: 8px;
+      padding: 6px 12px;
+      background: #444;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button:active {
+      background: #666;
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="hud">
+    <div><strong>📱 iPad 觸控木偶人</strong></div>
+    <div style="margin-top: 4px;">目前選中：<span id="currentPart" class="badge">無</span></div>
+    <div style="color: #aaa; font-size: 11px; margin-top: 6px;">
+      👉 <strong>單指拖曳</strong>：直接轉動人偶肢體<br>
+      ✌️ <strong>雙指滑動/捏合</strong>：旋轉相機視角與縮放
+    </div>
+    <button id="resetPoseBtn">重置站姿</button>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { TransformControls } from 'three/addons/controls/TransformControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    // 1. 初始化
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x181818);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 1.4, 3.0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.GridHelper(10, 20, 0x444444, 0x282828));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2));
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
+    dirLight.position.set(3, 8, 4);
+    scene.add(dirLight);
+
+    // 2. 控制器配置
+    const orbit = new OrbitControls(camera, renderer.domElement);
+    orbit.target.set(0, 1.0, 0);
+    orbit.enableDamping = true;
+    orbit.dampingFactor = 0.05;
+
+    // 將 OrbitControls 預設限制為雙指手勢，避免與單指轉關節打架
+    orbit.touches = {
+      ONE: null, // 單指不旋轉相機
+      TWO: THREE.TOUCH.DOLLY_ROTATE // 雙指縮放與旋轉
+    };
+    orbit.update();
+
+    const transform = new TransformControls(camera, renderer.domElement);
+    transform.setMode('rotate');
+    transform.size = 0.75;
+    scene.add(transform);
+
+    transform.addEventListener('dragging-changed', (e) => {
+      orbit.enabled = !e.value;
+    });
+
+    // 3. 中文名稱對照表
+    function toChineseName(name) {
+      const n = name.toLowerCase();
+      if (n.includes('head')) return '頭部';
+      if (n.includes('neck')) return '頸部';
+      if (n.includes('spine2') || n.includes('chest')) return '胸部 / 上身';
+      if (n.includes('spine1')) return '腹部';
+      if (n.includes('spine')) return '腰部 / 脊椎';
+      if (n.includes('hips') || n.includes('pelvis')) return '骨盆';
+
+      const isLeft = n.includes('left') || n.endsWith('_l') || n.includes('.l');
+      const isRight = n.includes('right') || n.endsWith('_r') || n.includes('.r');
+      const prefix = isLeft ? '左' : isRight ? '右' : '';
+
+      if (n.includes('shoulder')) return prefix + '肩膀';
+      if (n.includes('forearm') || n.includes('elbow')) return prefix + '手肘（前臂）';
+      if (n.includes('arm')) return prefix + '手臂（上臂）';
+      if (n.includes('hand') || n.includes('wrist')) return prefix + '手掌';
+      if (n.includes('upleg') || n.includes('thigh')) return prefix + '大腿';
+      if (n.includes('leg') || n.includes('knee') || n.includes('calf')) return prefix + '膝蓋（小腿）';
+      if (n.includes('foot') || n.includes('ankle') || n.includes('toe')) return prefix + '腳掌';
+
+      return name;
+    }
+
+    // 4. 載入模型與建立關節感應球
+    const loader = new GLTFLoader();
+    const MODEL_URL = 'https://threejs.org/examples/models/gltf/Xbot.glb';
+
+    const pickableJoints = [];
+    const defaultRotations = new Map();
+    let loadedModel = null;
+    let selectedBone = null;
+    const currentPartEl = document.getElementById('currentPart');
+
+    loader.load(MODEL_URL, (gltf) => {
+      loadedModel = gltf.scene;
+      scene.add(loadedModel);
+
+      // 手指接觸判定球（半徑設為 0.07，更易於觸控選取）
+      const sphereGeo = new THREE.SphereGeometry(0.07, 12, 12);
+
+      loadedModel.traverse((child) => {
+        if (child.isBone) {
+          defaultRotations.set(child, child.rotation.clone());
+
+          const chName = toChineseName(child.name);
+          const isFinger = /thumb|index|middle|ring|pinky/i.test(child.name);
+
+          if (!isFinger && chName !== child.name) {
+            const jointMesh = new THREE.Mesh(
+              sphereGeo,
+              new THREE.MeshBasicMaterial({
+                color: 0x00d4aa,
+                transparent: true,
+                opacity: 0.45,
+                depthTest: false
+              })
+            );
+            jointMesh.userData = {
+              bone: child,
+              chineseName: chName
+            };
+            child.add(jointMesh);
+            pickableJoints.push(jointMesh);
+          }
+        }
+      });
+    });
+
+    function selectBone(bone, name) {
+      selectedBone = bone;
+      if (bone) {
+        transform.attach(bone);
+        currentPartEl.textContent = name || toChineseName(bone.name);
+      } else {
+        transform.detach();
+        currentPartEl.textContent = '無';
+      }
+    }
+
+    // 5. 觸控拖曳關節核心邏輯
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let isDraggingBone = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    window.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('#hud')) return;
+      if (transform.dragging) return;
+
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObjects([...pickableJoints, loadedModel], true);
+
+      if (hits.length > 0) {
+        let bone = null;
+        let name = '';
+
+        const sphereHit = hits.find((h) => h.object.userData && h.object.userData.bone);
+        if (sphereHit) {
+          bone = sphereHit.object.userData.bone;
+          name = sphereHit.object.userData.chineseName;
+        } else if (loadedModel) {
+          // 點擊皮膚時比對最近骨骼
+          const pt = hits[0].point;
+          let minD = Infinity;
+          const tempV = new THREE.Vector3();
+          for (const jm of pickableJoints) {
+            jm.getWorldPosition(tempV);
+            const d = tempV.distanceTo(pt);
+            if (d < minD) {
+              minD = d;
+              bone = jm.userData.bone;
+              name = jm.userData.chineseName;
+            }
+          }
+        }
+
+        if (bone) {
+          selectBone(bone, name);
+          isDraggingBone = true;
+          orbit.enabled = false; // 單指拖動骨骼時暫停相機
+          lastX = e.clientX;
+          lastY = e.clientY;
+        }
+      }
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (isDraggingBone && selectedBone) {
+        const deltaX = e.clientX - lastX;
+        const deltaY = e.clientY - lastY;
+
+        const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+
+        // 旋轉靈敏度設定
+        selectedBone.rotateOnWorldAxis(cameraUp, deltaX * 0.016);
+        selectedBone.rotateOnWorldAxis(cameraRight, deltaY * 0.016);
+
+        lastX = e.clientX;
+        lastY = e.clientY;
+      }
+    });
+
+    window.addEventListener('pointerup', () => {
+      isDraggingBone = false;
+      orbit.enabled = true;
+    });
+
+    // 重置按鈕
+    document.getElementById('resetPoseBtn').addEventListener('click', () => {
+      defaultRotations.forEach((rot, bone) => {
+        bone.rotation.copy(rot);
+      });
+      selectBone(null);
+    });
+
+    // 視窗自適應
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // 渲染循環
+    renderer.setAnimationLoop(() => {
+      orbit.update();
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>
